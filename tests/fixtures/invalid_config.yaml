@@ -1,0 +1,13 @@
+app:
+  name: ""
+  developer: ""
+  version: "0.1.0-test"
+
+network:
+  probe_timeout: -5s
+
+logging:
+  level: "NON_EXISTENT_LEVEL"
+
+firewall:
+  mode: "unknown_mode"

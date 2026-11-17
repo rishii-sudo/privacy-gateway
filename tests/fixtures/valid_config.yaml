@@ -1,0 +1,42 @@
+app:
+  name: "Privacy Gateway Fixture"
+  developer: "48sh1xbh"
+  version: "0.1.0-test"
+  environment: "development"
+
+network:
+  probe_timeout: 3s
+  enable_ipv6: false
+  dns_servers:
+    - "1.1.1.1"
+  ignore_loopback: true
+  virtual_interface_prefixes:
+    - "wg"
+
+logging:
+  level: "DEBUG"
+  log_to_console: false
+  log_to_file: true
+  filename: "fixture.log"
+  redact_sensitive: true
+
+storage:
+  log_dir: "Logs"
+  report_dir: "Reports"
+  recycle_bin_dir: "Recycle Bin"
+  backup_dir: "Backups"
+
+firewall:
+  mode: "simulate"
+  default_block: false
+  allow_local_dns: true
+
+privacy:
+  strict_interface_check: true
+  warn_on_ipv6: true
+  warn_on_hostname_leak: true
+
+telemetry:
+  enabled: false
+  allow_anonymous: false
+  destination: ""
