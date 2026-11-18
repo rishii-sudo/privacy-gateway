@@ -8,12 +8,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/48sh1xbh/privacy-gateway/internal/config"
-	"github.com/48sh1xbh/privacy-gateway/internal/logging"
-	"github.com/48sh1xbh/privacy-gateway/internal/monitor"
-	"github.com/48sh1xbh/privacy-gateway/internal/network"
-	"github.com/48sh1xbh/privacy-gateway/internal/privacy"
-	"github.com/48sh1xbh/privacy-gateway/internal/report"
+	"github.com/rishii-sudo/privacy-gateway/internal/config"
+	"github.com/rishii-sudo/privacy-gateway/internal/logging"
+	"github.com/rishii-sudo/privacy-gateway/internal/monitor"
+	"github.com/rishii-sudo/privacy-gateway/internal/network"
+	"github.com/rishii-sudo/privacy-gateway/internal/privacy"
+	"github.com/rishii-sudo/privacy-gateway/internal/report"
 )
 
 const (

@@ -4,8 +4,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/48sh1xbh/privacy-gateway/internal/app"
-	"github.com/48sh1xbh/privacy-gateway/internal/config"
+	"github.com/rishii-sudo/privacy-gateway/internal/app"
+	"github.com/rishii-sudo/privacy-gateway/internal/config"
 )
 
 func TestCLIRouting(t *testing.T) {

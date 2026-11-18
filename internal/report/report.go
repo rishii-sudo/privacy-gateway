@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/48sh1xbh/privacy-gateway/internal/monitor"
-	"github.com/48sh1xbh/privacy-gateway/internal/privacy"
+	"github.com/rishii-sudo/privacy-gateway/internal/monitor"
+	"github.com/rishii-sudo/privacy-gateway/internal/privacy"
 )
 
 const (

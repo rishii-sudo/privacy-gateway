@@ -1,7 +1,7 @@
 package windows
 
 import (
-	"github.com/48sh1xbh/privacy-gateway/internal/firewall"
+	"github.com/rishii-sudo/privacy-gateway/internal/firewall"
 )
 
 // WFPAdapter implements firewall.Adapter for Windows Filtering Platform.

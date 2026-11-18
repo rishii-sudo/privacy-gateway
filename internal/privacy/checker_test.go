@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/48sh1xbh/privacy-gateway/internal/config"
+	"github.com/rishii-sudo/privacy-gateway/internal/config"
 )
 
 func TestCheckerBaselineRuns(t *testing.T) {
@@ -68,6 +68,19 @@ func TestCheckHostnameExposure(t *testing.T) {
 	// Conservative check: Identifying vendor/device name -> INCONCLUSIVE; generic -> PASS
 	if res.Status != StatusPass && res.Status != StatusInconclusive {
 		t.Errorf("expected PASS or INCONCLUSIVE for hostname check, got %s", res.Status)
+	}
+
+	// Privacy Requirement: current_user must NEVER be collected or present in details
+	if _, exists := res.Details["current_user"]; exists {
+		t.Errorf("CheckHostnameExposure details must not contain 'current_user'")
+	}
+	if host, ok := res.Details["hostname"]; !ok || host == "" {
+		t.Errorf("CheckHostnameExposure details must retain 'hostname'")
+	}
+	for k := range res.Details {
+		if k != "hostname" {
+			t.Errorf("CheckHostnameExposure recorded unnecessary detail %q; only 'hostname' is permitted", k)
+		}
 	}
 }
 

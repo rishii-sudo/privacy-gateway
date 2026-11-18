@@ -4,9 +4,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/48sh1xbh/privacy-gateway/internal/firewall"
-	"github.com/48sh1xbh/privacy-gateway/internal/firewall/linux"
-	"github.com/48sh1xbh/privacy-gateway/internal/firewall/windows"
+	"github.com/rishii-sudo/privacy-gateway/internal/firewall"
+	"github.com/rishii-sudo/privacy-gateway/internal/firewall/linux"
+	"github.com/rishii-sudo/privacy-gateway/internal/firewall/windows"
 )
 
 func TestAdapters(t *testing.T) {

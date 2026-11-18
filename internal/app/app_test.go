@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/48sh1xbh/privacy-gateway/internal/config"
+	"github.com/rishii-sudo/privacy-gateway/internal/config"
 )
 
 func newTestApp(t *testing.T) *Application {

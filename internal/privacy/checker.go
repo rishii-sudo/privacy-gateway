@@ -4,12 +4,11 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"os/user"
 	"strings"
 	"time"
 
-	"github.com/48sh1xbh/privacy-gateway/internal/config"
-	"github.com/48sh1xbh/privacy-gateway/internal/network"
+	"github.com/rishii-sudo/privacy-gateway/internal/config"
+	"github.com/rishii-sudo/privacy-gateway/internal/network"
 )
 
 // Checker executes baseline privacy and security audits against the host system.
@@ -254,9 +253,10 @@ func (c *Checker) CheckIPv6Exposure() CheckResult {
 		WithRemediation("If your VPN or proxy does not route IPv6, disable IPv6 on the host or enforce firewall rules (M4) to prevent potential dual-stack leaks.")
 }
 
-// CheckHostnameExposure checks if system hostname reveals username or hardware identifiers.
+// CheckHostnameExposure checks if system hostname reveals hardware or vendor identifiers.
 // Principle: A local hostname does not prove network exposure.
-// Conservatively treats identifying vendor, hardware, or user names as INCONCLUSIVE.
+// Conservatively treats identifying vendor, hardware, or environment names as INCONCLUSIVE.
+// Per privacy engineering requirements, no OS username information is queried or recorded.
 func (c *Checker) CheckHostnameExposure() CheckResult {
 	id := "SYS_HOSTNAME_DISCOVERY"
 	name := "Local Hostname Identifier Check"
@@ -273,21 +273,8 @@ func (c *Checker) CheckHostnameExposure() CheckResult {
 		"hostname": hostname,
 	}
 
-	u, err := user.Current()
-	var username string
-	if err == nil && u != nil {
-		parts := strings.Split(u.Username, "\\")
-		username = strings.ToLower(parts[len(parts)-1])
-		details["current_user"] = username
-	}
-
 	suspicious := false
 	var reasons []string
-
-	if username != "" && len(username) > 2 && strings.Contains(lowerHost, username) {
-		suspicious = true
-		reasons = append(reasons, fmt.Sprintf("hostname contains current user identifier %q", username))
-	}
 
 	// Identifying vendor brands and hardware manufacturers
 	vendorKeywords := []string{
@@ -327,19 +314,19 @@ func (c *Checker) CheckHostnameExposure() CheckResult {
 		}
 	}
 
-	// Case 1: Hostname contains user or vendor hardware identifiers
+	// Case 1: Hostname contains vendor, hardware, or environment identifiers
 	// Conservatively classified as INCONCLUSIVE
 	if suspicious {
 		return NewCheckResult(id, name, cat, StatusInconclusive,
-			fmt.Sprintf("Hostname %q contains potentially identifying vendor, hardware, or user keywords (%s). While this presents an identification risk on local networks (via DHCP/mDNS/LLMNR), local hostname alone does not prove network broadcast exposure without active protocol inspection.",
+			fmt.Sprintf("Hostname %q contains potentially identifying vendor, hardware, or environment keywords (%s). While this presents an identification risk on local networks (via DHCP/mDNS/LLMNR), local hostname alone does not prove network broadcast exposure without active protocol inspection.",
 				hostname, strings.Join(reasons, ", "))).
 			WithDetails(details).
 			WithRemediation("Configure a generic, randomized hostname (e.g., using random alphanumeric characters) to prevent hardware vendor or device fingerprinting on local networks.")
 	}
 
-	// Case 2: Hostname does not match username or common device patterns
+	// Case 2: Hostname does not match vendor or common device patterns
 	return NewCheckResult(id, name, cat, StatusPass,
-		fmt.Sprintf("Hostname %q is generic and does not contain user, vendor, or default hardware identifiers.", hostname)).
+		fmt.Sprintf("Hostname %q is generic and does not contain vendor, device, or environment identifiers.", hostname)).
 		WithDetails(details)
 }
 

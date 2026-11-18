@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/48sh1xbh/privacy-gateway/internal/app"
+	"github.com/rishii-sudo/privacy-gateway/internal/app"
 )
 
 func main() {

@@ -1,7 +1,7 @@
 package linux
 
 import (
-	"github.com/48sh1xbh/privacy-gateway/internal/firewall"
+	"github.com/rishii-sudo/privacy-gateway/internal/firewall"
 )
 
 // NftablesAdapter implements firewall.Adapter for Linux nftables.
