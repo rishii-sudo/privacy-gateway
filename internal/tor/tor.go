@@ -1,34 +1,16 @@
 package tor
 
 import (
-	"errors"
-	"time"
+	"context"
+	"fmt"
 )
 
 var (
-	// ErrNotImplemented indicates the Tor control protocol integration is scheduled for Milestone 2.
-	ErrNotImplemented = errors.New("tor integration is scheduled for Milestone 2 (M2)")
+	// ErrSignalNewnymDisabled confirms SIGNAL NEWNYM is restricted in M2.
+	ErrSignalNewnymDisabled = fmt.Errorf("SIGNAL NEWNYM is restricted in Milestone 2 (M2) monitoring scope")
 )
 
-// BootstrapStatus represents the Tor daemon bootstrap progress.
-type BootstrapStatus struct {
-	Progress int       `json:"progress"` // 0 to 100
-	Phase    string    `json:"phase"`
-	Summary  string    `json:"summary"`
-	Ready    bool      `json:"ready"`
-	Updated  time.Time `json:"updated"`
-}
-
-// Circuit represents an established Tor multi-relay circuit.
-type Circuit struct {
-	ID        string    `json:"id"`
-	Status    string    `json:"status"`
-	Relays    []string  `json:"relays"`
-	BuildTime time.Time `json:"build_time"`
-}
-
-// Controller defines the contract for communicating with the local Tor daemon
-// via the Tor Control Protocol.
+// Controller defines the high-level contract for communicating with the local Tor daemon.
 type Controller interface {
 	Connect(controlAddr, password string) error
 	GetBootstrapStatus() (*BootstrapStatus, error)
@@ -58,4 +40,17 @@ func (u *UnimplementedController) RequestNewIdentity() error {
 
 func (u *UnimplementedController) Close() error {
 	return nil
+}
+
+// Ensure Client can satisfy Controller through compatibility adapters if needed.
+func (c *Client) RequestNewIdentity() error {
+	return ErrSignalNewnymDisabled
+}
+
+func (c *Client) GetBootstrapStatusLegacy() (*BootstrapStatus, error) {
+	return c.GetBootstrapStatus(context.Background())
+}
+
+func (c *Client) GetActiveCircuitsLegacy() ([]Circuit, error) {
+	return c.GetActiveCircuits(context.Background())
 }

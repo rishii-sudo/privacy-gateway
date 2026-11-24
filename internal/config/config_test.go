@@ -98,6 +98,198 @@ func TestValidationErrors(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "tor negative connection timeout",
+			modify: func(c *Config) {
+				c.Tor.ConnectionTimeout = -1 * time.Second
+			},
+			wantErr: true,
+		},
+		{
+			name: "tor invalid network mode",
+			modify: func(c *Config) {
+				c.Tor.NetworkMode = "udp"
+			},
+			wantErr: true,
+		},
+		{
+			name: "tor non loopback endpoint rejected",
+			modify: func(c *Config) {
+				c.Tor.ControlEndpoint = "192.168.1.50:9051"
+			},
+			wantErr: true,
+		},
+		{
+			name: "tor malformed endpoint missing port rejected",
+			modify: func(c *Config) {
+				c.Tor.ControlEndpoint = "127.0.0.1"
+			},
+			wantErr: true,
+		},
+		{
+			name: "tor malformed endpoint invalid format rejected",
+			modify: func(c *Config) {
+				c.Tor.ControlEndpoint = "not_an_endpoint"
+			},
+			wantErr: true,
+		},
+		{
+			name: "tor remote domain endpoint rejected",
+			modify: func(c *Config) {
+				c.Tor.ControlEndpoint = "tor.example.com:9051"
+			},
+			wantErr: true,
+		},
+		{
+			name: "tor empty endpoint rejected in tcp mode",
+			modify: func(c *Config) {
+				c.Tor.ControlEndpoint = ""
+			},
+			wantErr: true,
+		},
+		{
+			name: "tor valid ipv4 loopback accepted",
+			modify: func(c *Config) {
+				c.Tor.ControlEndpoint = "127.0.0.2:9151"
+			},
+			wantErr: false,
+		},
+		{
+			name: "tor valid ipv6 loopback accepted",
+			modify: func(c *Config) {
+				c.Tor.ControlEndpoint = "[::1]:9051"
+			},
+			wantErr: false,
+		},
+		{
+			name: "tor valid localhost accepted",
+			modify: func(c *Config) {
+				c.Tor.ControlEndpoint = "localhost:9051"
+			},
+			wantErr: false,
+		},
+		{
+			name: "tor port zero rejected",
+			modify: func(c *Config) {
+				c.Tor.ControlEndpoint = "127.0.0.1:0"
+			},
+			wantErr: true,
+		},
+		{
+			name: "tor port out of range high rejected",
+			modify: func(c *Config) {
+				c.Tor.ControlEndpoint = "127.0.0.1:65536"
+			},
+			wantErr: true,
+		},
+		{
+			name: "tor port negative rejected",
+			modify: func(c *Config) {
+				c.Tor.ControlEndpoint = "127.0.0.1:-1"
+			},
+			wantErr: true,
+		},
+		{
+			name: "tor port non-numeric rejected",
+			modify: func(c *Config) {
+				c.Tor.ControlEndpoint = "127.0.0.1:control"
+			},
+			wantErr: true,
+		},
+		{
+			name: "tor port valid minimum 1 accepted",
+			modify: func(c *Config) {
+				c.Tor.ControlEndpoint = "127.0.0.1:1"
+			},
+			wantErr: false,
+		},
+		{
+			name: "tor port valid maximum 65535 accepted",
+			modify: func(c *Config) {
+				c.Tor.ControlEndpoint = "127.0.0.1:65535"
+			},
+			wantErr: false,
+		},
+		{
+			name: "tor unix valid absolute path accepted",
+			modify: func(c *Config) {
+				c.Tor.NetworkMode = "unix"
+				c.Tor.ControlEndpoint = "/var/run/tor/control"
+			},
+			wantErr: false,
+		},
+		{
+			name: "tor unix relative path rejected",
+			modify: func(c *Config) {
+				c.Tor.NetworkMode = "unix"
+				c.Tor.ControlEndpoint = "control.sock"
+			},
+			wantErr: true,
+		},
+		{
+			name: "tor unix null byte rejected",
+			modify: func(c *Config) {
+				c.Tor.NetworkMode = "unix"
+				c.Tor.ControlEndpoint = "/var/run\x00/control"
+			},
+			wantErr: true,
+		},
+		{
+			name: "tor invalid queue limit zero",
+			modify: func(c *Config) {
+				c.Tor.EventQueueLimit = 0
+			},
+			wantErr: true,
+		},
+		{
+			name: "tor invalid queue limit negative",
+			modify: func(c *Config) {
+				c.Tor.EventQueueLimit = -10
+			},
+			wantErr: true,
+		},
+		{
+			name: "tor queue limit exceeds safe maximum",
+			modify: func(c *Config) {
+				c.Tor.EventQueueLimit = 10001
+			},
+			wantErr: true,
+		},
+		{
+			name: "tor valid queue limit boundary",
+			modify: func(c *Config) {
+				c.Tor.EventQueueLimit = 10000
+			},
+			wantErr: false,
+		},
+		{
+			name: "tor invalid message size zero",
+			modify: func(c *Config) {
+				c.Tor.MaxProtocolMsgSize = 0
+			},
+			wantErr: true,
+		},
+		{
+			name: "tor invalid message size negative",
+			modify: func(c *Config) {
+				c.Tor.MaxProtocolMsgSize = -5
+			},
+			wantErr: true,
+		},
+		{
+			name: "tor message size exceeds maximum 65536",
+			modify: func(c *Config) {
+				c.Tor.MaxProtocolMsgSize = 65537
+			},
+			wantErr: true,
+		},
+		{
+			name: "tor valid message size maximum boundary 65536",
+			modify: func(c *Config) {
+				c.Tor.MaxProtocolMsgSize = 65536
+			},
+			wantErr: false,
+		},
 	}
 
 	for _, tc := range tests {

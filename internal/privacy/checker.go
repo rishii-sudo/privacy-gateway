@@ -1,6 +1,8 @@
 package privacy
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -9,12 +11,14 @@ import (
 
 	"github.com/rishii-sudo/privacy-gateway/internal/config"
 	"github.com/rishii-sudo/privacy-gateway/internal/network"
+	"github.com/rishii-sudo/privacy-gateway/internal/tor"
 )
 
 // Checker executes baseline privacy and security audits against the host system.
 type Checker struct {
 	cfg        *config.Config
 	enumerator *network.NetworkEnumerator
+	torClient  *tor.Client
 }
 
 // NewChecker initializes a new Checker with the given configuration.
@@ -29,7 +33,12 @@ func NewChecker(cfg *config.Config) *Checker {
 	}
 }
 
-// RunAllBaselineChecks executes all implemented M1 checks and stubs future milestone checks
+// SetTorClient injects a Tor client instance into the Checker.
+func (c *Checker) SetTorClient(client *tor.Client) {
+	c.torClient = client
+}
+
+// RunAllBaselineChecks executes all implemented M1/M2 checks and stubs future milestone checks
 // with typed NOT_IMPLEMENTED status.
 func (c *Checker) RunAllBaselineChecks() ([]CheckResult, error) {
 	var results []CheckResult
@@ -46,20 +55,16 @@ func (c *Checker) RunAllBaselineChecks() ([]CheckResult, error) {
 	// 4. DNS Resolver Privacy Check
 	results = append(results, c.CheckDNSResolverPrivacy())
 
-	// Future Milestone Verification Stubs (All NOT_IMPLEMENTED in M1)
-	results = append(results, c.stubCheck(
-		"TOR_DAEMON_BOOTSTRAP",
-		"Tor Daemon Bootstrap Verification",
-		CategoryTor,
-		"Tor Control Protocol integration is scheduled for Milestone 2 (M2).",
-	))
+	// 5. Tor Control Authentication Check (M2)
+	results = append(results, c.CheckTorAuth())
 
-	results = append(results, c.stubCheck(
-		"TOR_CIRCUIT_STATUS",
-		"Tor Circuit Status and Health",
-		CategoryTor,
-		"Tor circuit and relay monitoring is scheduled for Milestone 2 (M2).",
-	))
+	// 6. Tor Daemon Bootstrap Check (M2)
+	results = append(results, c.CheckTorBootstrap())
+
+	// 7. Tor Circuit Status and Health Check (M2)
+	results = append(results, c.CheckTorCircuitStatus())
+
+	// Future Milestone Verification Stubs (All NOT_IMPLEMENTED in M2)
 
 	results = append(results, c.stubCheck(
 		"VPN_TUNNEL_CONNECTIVITY",
@@ -390,5 +395,292 @@ func (c *Checker) CheckDNSResolverPrivacy() CheckResult {
 func (c *Checker) stubCheck(id, name string, cat Category, summary string) CheckResult {
 	res := NewCheckResult(id, name, cat, StatusNotImplemented, summary)
 	res.Timestamp = time.Now().UTC()
+	return res
+}
+
+func (c *Checker) ensureTorClient(ctx context.Context) (*tor.Client, error) {
+	if c.torClient != nil {
+		return c.torClient, nil
+	}
+	if !c.cfg.Tor.Enabled {
+		return nil, errors.New("Tor integration is disabled in configuration (tor.enabled=false)")
+	}
+
+	client := tor.NewClient(c.cfg, nil)
+	c.torClient = client
+	return client, nil
+}
+
+// CheckTorAuth verifies connectivity and SAFECOOKIE authentication with the local Tor daemon.
+func (c *Checker) CheckTorAuth() CheckResult {
+	res := NewCheckResult(
+		"TOR_CONTROL_AUTH",
+		"Tor Control Port Authentication",
+		CategoryTor,
+		StatusInconclusive,
+		"Tor control authentication verification",
+	)
+
+	if !c.cfg.Tor.Enabled && c.torClient == nil {
+		res.Status = StatusInconclusive
+		res.Summary = "Tor control verification skipped: Tor is disabled in configuration (tor.enabled=false)"
+		res.Details = map[string]interface{}{
+			"enabled":          false,
+			"control_endpoint": c.cfg.Tor.ControlEndpoint,
+		}
+		res.Remediation = "Enable Tor in configuration (tor.enabled: true) or provide --tor flag to verify Tor daemon."
+		return res
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), c.cfg.Tor.ConnectionTimeout)
+	defer cancel()
+
+	client, err := c.ensureTorClient(ctx)
+	if err != nil {
+		res.Status = StatusInconclusive
+		res.Summary = fmt.Sprintf("Tor daemon unavailable: %v", err)
+		res.Details = map[string]interface{}{
+			"endpoint": c.cfg.Tor.ControlEndpoint,
+			"error":    err.Error(),
+		}
+		res.Remediation = "Ensure Tor daemon is installed and running with ControlPort 9051."
+		return res
+	}
+
+	// Connect if not already connected
+	if client.State() == tor.StateDisconnected || client.State() == tor.StateClosed {
+		if err := client.Connect(ctx); err != nil {
+			res.Status = StatusInconclusive
+			res.Summary = fmt.Sprintf("Tor control endpoint %s unreachable: %v", c.cfg.Tor.ControlEndpoint, err)
+			res.Details = map[string]interface{}{
+				"endpoint": c.cfg.Tor.ControlEndpoint,
+				"error":    err.Error(),
+			}
+			res.Remediation = "Ensure Tor daemon is running and listening on local ControlPort 9051."
+			return res
+		}
+	}
+
+	// Authenticate if not already authenticated
+	var authResult *tor.AuthResult
+	if client.State() != tor.StateAuthenticated {
+		authResult, err = client.Authenticate(ctx)
+		if err != nil {
+			if errors.Is(err, tor.ErrInvalidHMAC) || errors.Is(err, tor.ErrAuthFailed) {
+				res.Status = StatusFail
+				res.Summary = fmt.Sprintf("Tor ControlPort authentication failed closed: %v", err)
+				res.Details = map[string]interface{}{
+					"endpoint":      c.cfg.Tor.ControlEndpoint,
+					"authenticated": false,
+					"error":         err.Error(),
+				}
+				res.Remediation = "Verify Tor control cookie permissions and ensure SAFECOOKIE authentication is configured."
+				return res
+			}
+
+			res.Status = StatusInconclusive
+			res.Summary = fmt.Sprintf("Tor ControlPort negotiation failed: %v", err)
+			res.Details = map[string]interface{}{
+				"endpoint": c.cfg.Tor.ControlEndpoint,
+				"error":    err.Error(),
+			}
+			res.Remediation = "Verify Tor control endpoint configuration and cookie permissions."
+			return res
+		}
+	} else {
+		authResult = client.LastAuthResult()
+	}
+
+	// Authentication PASS must depend strictly on confirmed, successful SAFECOOKIE authentication
+	if authResult == nil || !authResult.Success || !strings.EqualFold(authResult.Method, "SAFECOOKIE") {
+		res.Status = StatusFail
+		res.Summary = "Tor ControlPort authentication verification failed: valid SAFECOOKIE authentication not confirmed"
+		errStr := "SAFECOOKIE authentication not confirmed"
+		if authResult != nil && authResult.Error != "" {
+			errStr = authResult.Error
+		}
+		res.Details = map[string]interface{}{
+			"endpoint":      c.cfg.Tor.ControlEndpoint,
+			"authenticated": false,
+			"error":         errStr,
+		}
+		res.Remediation = "Verify Tor control cookie permissions and ensure SAFECOOKIE authentication is configured."
+		return res
+	}
+
+	// Handle GetVersion separately; do not silently report missing version information as successful retrieval
+	ver, verErr := client.GetVersion(ctx)
+	if verErr != nil {
+		res.Status = StatusPass
+		res.Summary = "Tor ControlPort authenticated successfully via SAFECOOKIE (version query failed)"
+		res.Details = map[string]interface{}{
+			"endpoint":      c.cfg.Tor.ControlEndpoint,
+			"authenticated": true,
+			"method":        "SAFECOOKIE",
+			"version":       nil,
+			"version_error": verErr.Error(),
+			"caution":       "Tor control connection authenticated. Note: Control connection does NOT imply that system traffic is routed through Tor.",
+		}
+		return res
+	}
+
+	res.Status = StatusPass
+	res.Summary = fmt.Sprintf("Tor ControlPort authenticated successfully via SAFECOOKIE (version: %s)", ver)
+	res.Details = map[string]interface{}{
+		"endpoint":      c.cfg.Tor.ControlEndpoint,
+		"authenticated": true,
+		"method":        "SAFECOOKIE",
+		"version":       ver,
+		"caution":       "Tor control connection authenticated. Note: Control connection does NOT imply that system traffic is routed through Tor.",
+	}
+	return res
+}
+
+// CheckTorBootstrap verifies whether the Tor daemon has completed bootstrap initialization.
+func (c *Checker) CheckTorBootstrap() CheckResult {
+	res := NewCheckResult(
+		"TOR_DAEMON_BOOTSTRAP",
+		"Tor Daemon Bootstrap Verification",
+		CategoryTor,
+		StatusInconclusive,
+		"Tor daemon bootstrap status verification",
+	)
+
+	if !c.cfg.Tor.Enabled && c.torClient == nil {
+		res.Status = StatusInconclusive
+		res.Summary = "Tor daemon bootstrap check skipped: Tor is disabled in configuration"
+		res.Remediation = "Enable Tor in configuration (tor.enabled: true) to verify bootstrap status."
+		return res
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), c.cfg.Tor.ConnectionTimeout)
+	defer cancel()
+
+	client, err := c.ensureTorClient(ctx)
+	if err != nil || client.State() != tor.StateAuthenticated {
+		res.Status = StatusInconclusive
+		res.Summary = "Tor daemon bootstrap status could not be verified (controller not authenticated)"
+		res.Remediation = "Ensure Tor daemon is running and control authentication succeeds."
+		return res
+	}
+
+	boot, err := client.GetBootstrapStatus(ctx)
+	if err != nil {
+		res.Status = StatusInconclusive
+		res.Summary = fmt.Sprintf("Failed to query Tor bootstrap status: %v", err)
+		res.Details = map[string]interface{}{
+			"error": err.Error(),
+		}
+		res.Remediation = "Inspect Tor daemon logs for bootstrap failures or directory connectivity issues."
+		return res
+	}
+
+	res.Details = map[string]interface{}{
+		"progress": boot.Progress,
+		"tag":      boot.Tag,
+		"summary":  boot.Summary,
+		"ready":    boot.Ready,
+	}
+
+	if boot.Ready && boot.Progress == 100 {
+		res.Status = StatusPass
+		res.Summary = fmt.Sprintf("Tor daemon bootstrap complete: 100%% (%s)", boot.Tag)
+		res.Details["caution"] = "Tor network bootstrap is complete. Note: Local applications still require explicit SOCKS5 proxy configuration to use Tor."
+		return res
+	}
+
+	res.Status = StatusInconclusive
+	res.Summary = fmt.Sprintf("Tor daemon bootstrap in progress: %d%% (%s: %s)", boot.Progress, boot.Tag, boot.Summary)
+	if boot.Warning != "" {
+		res.Details["warning"] = boot.Warning
+	}
+	res.Remediation = "Wait for Tor bootstrap to complete (100%) or check network connectivity and system clock synchronization."
+	return res
+}
+
+// CheckTorCircuitStatus verifies whether active, multi-hop circuits have been established by the Tor daemon.
+func (c *Checker) CheckTorCircuitStatus() CheckResult {
+	res := NewCheckResult(
+		"TOR_CIRCUIT_STATUS",
+		"Tor Circuit Status and Health",
+		CategoryTor,
+		StatusInconclusive,
+		"Tor circuit and relay health verification",
+	)
+
+	if !c.cfg.Tor.Enabled && c.torClient == nil {
+		res.Status = StatusInconclusive
+		res.Summary = "Tor circuit check skipped: Tor is disabled in configuration"
+		res.Remediation = "Enable Tor in configuration (tor.enabled: true) to verify circuit status."
+		return res
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), c.cfg.Tor.ConnectionTimeout)
+	defer cancel()
+
+	client, err := c.ensureTorClient(ctx)
+	if err != nil || client.State() != tor.StateAuthenticated {
+		res.Status = StatusInconclusive
+		res.Summary = "Tor circuit status could not be verified (controller not authenticated)"
+		res.Remediation = "Ensure Tor daemon is running and control authentication succeeds."
+		return res
+	}
+
+	established, err := client.GetCircuitEstablished(ctx)
+	if err != nil {
+		res.Status = StatusInconclusive
+		res.Summary = fmt.Sprintf("Failed to query Tor circuit established status: %v", err)
+		res.Details = map[string]interface{}{
+			"error": err.Error(),
+		}
+		return res
+	}
+
+	circuits, err := client.GetActiveCircuits(ctx)
+	if err != nil {
+		res.Status = StatusInconclusive
+		res.Summary = fmt.Sprintf("Failed to query Tor active circuits: %v", err)
+		res.Details = map[string]interface{}{
+			"error": err.Error(),
+		}
+		return res
+	}
+
+	builtCount := 0
+	for _, circ := range circuits {
+		if circ.Status == "BUILT" {
+			builtCount++
+		}
+	}
+
+	res.Details = map[string]interface{}{
+		"circuit_established": established,
+		"total_circuits":      len(circuits),
+		"built_circuits":      builtCount,
+		"monitoring_health":   string(client.MonitoringStatus().Health),
+	}
+
+	// Gap 1: Event queue overflow produces an explicit degraded monitoring state / INCONCLUSIVE result
+	monStatus := client.MonitoringStatus()
+	if monStatus.Health == tor.MonitoringHealthDegraded {
+		res.Status = StatusInconclusive
+		res.Summary = fmt.Sprintf("Tor circuit monitoring degraded: event queue overflow (%d events dropped)", monStatus.DroppedEvents)
+		res.Details["dropped_events"] = monStatus.DroppedEvents
+		res.Details["total_events"] = monStatus.TotalEvents
+		res.Details["degraded_reason"] = monStatus.DegradedReason
+		res.Remediation = "Increase tor.event_queue_limit in configuration or inspect consumer processing throughput to resolve event queue saturation."
+		return res
+	}
+
+	if established && builtCount > 0 {
+		res.Status = StatusPass
+		res.Summary = fmt.Sprintf("Tor has %d established BUILT circuit(s) across the Tor network", builtCount)
+		res.Details["caution"] = "Established Tor circuits are available for SOCKS streams. Host traffic is not automatically protected unless applications or system routing are explicitly configured."
+		return res
+	}
+
+	res.Status = StatusInconclusive
+	res.Summary = fmt.Sprintf("Tor circuits not ready: %d built circuit(s), circuit_established=%t", builtCount, established)
+	res.Remediation = "Allow Tor daemon time to establish guard, middle, and exit relays."
 	return res
 }

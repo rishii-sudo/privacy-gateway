@@ -1,95 +1,76 @@
-﻿# Architecture Documentation â€” Privacy Gateway
+# Privacy Gateway Architecture
 
 **Developer:** 48sh1xbh
-**Category:** Privacy Verification, Network Security Monitoring and Privacy Management Platform
-**Target Platforms:** Windows, Linux, Kali Linux
+**Category:** Privacy verification and network security monitoring
+**Target platforms:** Windows, Linux, and Kali Linux (platform-specific runtime validation is required)
 
----
+## 1. Architectural principles
 
-## 1. Architectural Philosophy & Principles
+1. **Defensive verification:** the project provides auditing, validation, and security monitoring. It is not designed for covert surveillance, evidence destruction, or evasion of lawful attribution.
+2. **Separation of concerns:** CLI/application orchestration, core verification logic, platform adapters, and parser subprocesses remain separated.
+3. **Read-only discovery by default:** M2 Tor operations observe daemon state and do not change Tor configuration, host routing, firewall policy, or system proxy settings.
+4. **Fail-closed status reporting:** uncertain or incomplete observations must not be reported as successful verification. The status model includes `PASS`, `FAIL`, `INCONCLUSIVE`, and `NOT_IMPLEMENTED`.
+5. **Local-first operation:** logs and reports are stored locally. The application does not require a remote telemetry service.
 
-Privacy Gateway is designed as a legitimate privacy engineering and authorized security research platform. The system adheres to strict engineering principles:
+## 2. Repository layout
 
-1. **Defensive Verification, Not Deception**: Privacy Gateway provides auditing, validation, and defensive fail-closed controls. It does not provide covert surveillance, evidence destruction, or evasion of lawful attribution.
-2. **Strict Separation of Concerns**: Clear structural separation between CLI interaction, internal core logic, platform adapters (WFP/nftables), GUI representation, and local API servers.
-3. **Read-Only Discovery by Default**: System and network discovery operations query the operating system in a strictly read-only manner, emitting zero unsolicited network packets during enumeration.
-4. **Fail-Closed Security Posture**: Security boundaries (such as the kill switch scheduled for Milestone 4) default to a closed state, requiring explicit administrative approval before applying any system modifications.
-5. **No Telemetry by Default**: All logs, diagnostics, and reports remain local to the user's filesystem in the `Logs/` and `Reports/` directories. No background data collection or remote transmission exists.
-
----
-
-## 2. Directory Layout
-
-```
+```text
 Privacy-Gateway/
-â”œâ”€â”€ cmd/
-â”‚   â””â”€â”€ gateway/                 # Main binary entrypoint & argument dispatch
-â”œâ”€â”€ internal/
-â”‚   â”œâ”€â”€ app/                     # Application lifecycle, CLI shells, and command routers
-â”‚   â”œâ”€â”€ api/                     # Local Go authenticated API server (M9)
-â”‚   â”œâ”€â”€ config/                  # Safe YAML configuration management & validation
-â”‚   â”œâ”€â”€ monitor/                 # Host runtime, OS, architecture, and memory monitoring
-â”‚   â”œâ”€â”€ privacy/                 # Status engine, check results, and baseline privacy tests
-â”‚   â”œâ”€â”€ network/                 # Read-only network interface enumeration & DNS discovery
-â”‚   â”œâ”€â”€ tor/                     # Tor Control Protocol controller & circuit tracker (M2)
-â”‚   â”œâ”€â”€ vpn/                     # VPN interface discovery & tunnel verification (M3)
-â”‚   â”œâ”€â”€ routing/                 # Multi-hop routing chain validation (M5)
-â”‚   â”œâ”€â”€ firewall/                # Operating system firewall abstraction & kill switch (M4)
-â”‚   â”‚   â”œâ”€â”€ linux/               # Linux nftables adapter
-â”‚   â”‚   â””â”€â”€ windows/             # Windows Filtering Platform (WFP) adapter
-â”‚   â”œâ”€â”€ tracker/                 # System-wide and browser tracker mitigation (M6)
-â”‚   â”œâ”€â”€ obfuscation/             # Transport disguise (obfs4, bridges) verification (M6)
-â”‚   â”œâ”€â”€ isolation/               # Personal vs research environment separation (M7)
-â”‚   â”œâ”€â”€ footprint/               # Legitimate digital footprint & exposure auditing (M7)
-â”‚   â”œâ”€â”€ deception/               # Isolated research honeypot decoys (M8)
-â”‚   â”œâ”€â”€ logging/                 # Structured local logging, redaction & recycle bin
-â”‚   â”œâ”€â”€ report/                  # Terminal and JSON security audit report generator
-â”‚   â”œâ”€â”€ audit/                   # Immutable security audit log engine (M10)
-â”‚   â””â”€â”€ authorization/           # Fine-grained operational policy enforcement (M9)
-â”œâ”€â”€ frontend/
-â”‚   â””â”€â”€ src/                     # React/TypeScript desktop GUI (M9)
-â”œâ”€â”€ configs/
-â”‚   â””â”€â”€ default.yaml             # Production baseline configuration
-â”œâ”€â”€ tests/
-â”‚   â””â”€â”€ fixtures/                # Configuration and test fixtures
-â”œâ”€â”€ docs/                        # Architecture, specifications, and CLI documentation
-â”œâ”€â”€ Logs/                        # Active runtime log storage
-â”œâ”€â”€ Reports/                     # Saved audit and verification reports
-â”œâ”€â”€ Recycle Bin/                 # Archived logs with user-controlled recovery
-â””â”€â”€ Backups/                     # Configuration and state backups
+├── cmd/gateway/                 # Go application entry point
+├── configs/                     # Default YAML configuration
+├── crates/pg-tor-inspector/     # Rust parser subprocess for M2
+├── docs/                        # Architecture, CLI, and milestone documentation
+├── internal/
+│   ├── app/                     # Application lifecycle and CLI command routing
+│   ├── config/                  # Configuration loading and validation
+│   ├── monitor/                 # Host runtime monitoring
+│   ├── network/                 # Network interface and DNS discovery
+│   ├── privacy/                 # Privacy status and verification checks
+│   ├── tor/                     # Tor Control Protocol client and event monitoring (M2)
+│   └── ...                      # Additional foundation/planned capability packages
+└── tests/                       # Test fixtures
 ```
 
----
+The presence of a package directory does not imply that its associated future milestone is complete or production-ready.
 
-## 3. Strongly Typed Status Engine
-
-The status engine defines four verification states:
+## 3. Status model
 
 | Status | Meaning |
-| :--- | :--- |
-| **`PASS`** | The tested privacy or security requirement was completely satisfied. |
-| **`FAIL`** | A verified security vulnerability, privacy leak, or unprotected state was detected. |
-| **`INCONCLUSIVE`** | The check could not reach a definitive conclusion (e.g., endpoint timed out or state is ambiguous). Never reported as `PASS`. |
-| **`NOT_IMPLEMENTED`** | The capability belongs to a planned future milestone and is not yet available. |
+|---|---|
+| `PASS` | The tested requirement was satisfied. |
+| `FAIL` | A verified failure or unsafe state was detected. |
+| `INCONCLUSIVE` | The check could not reach a reliable conclusion. It must never be treated as `PASS`. |
+| `NOT_IMPLEMENTED` | The capability is not implemented in the current release scope. |
 
-### Status Precedence (Aggregation Rules)
-When aggregating multiple verification results into an overall score:
-1. If **any** check is `FAIL`, the overall status is **`FAIL`**.
-2. If no check failed, but at least one check is `INCONCLUSIVE`, the overall status is **`INCONCLUSIVE`**.
-3. If all checks are `NOT_IMPLEMENTED`, the overall status is **`NOT_IMPLEMENTED`**.
-4. Only when all implemented checks satisfy requirements does the status become **`PASS`**.
+Aggregation precedence is `FAIL`, then `INCONCLUSIVE`, then `NOT_IMPLEMENTED`; `PASS` is appropriate only when all implemented checks satisfy their requirements.
 
----
+## 4. M2 Tor architecture
 
-## 4. Milestone Roadmap
+The Go package `internal/tor` is authoritative for the Tor Control Protocol connection, authentication, command sequencing, event demultiplexing, and state. The Rust `pg-tor-inspector` executable is an isolated parser helper using versioned JSON Lines over standard input and output. Go validates parser output before accepting it and provides a fallback parser for supported response types when the Rust helper is unavailable.
 
-- **M1 â€” Foundation (Current)**: Go module initialization, architecture, configuration management, status engine, system monitoring, read-only network enumeration, baseline privacy checks, terminal/JSON reporting, and CLI startup interface.
-- **M2 â€” Tor Integration**: Native Tor Control Protocol integration, bootstrap tracking, circuit observation, and bridge configuration.
-- **M3 â€” Network Privacy**: Multi-endpoint public IP verification, IPv6 leak detection, VPN tunnel monitoring, and WebRTC checks.
-- **M4 â€” Firewall Protection**: Windows Filtering Platform (WFP) and Linux nftables adapters, simulation mode, and fail-closed kill switch.
-- **M5 â€” Advanced Routing**: Multi-hop routing chains, route verification, and exit node monitoring.
-- **M6 â€” Tracker & Obfuscation**: DNS tracker blocklist filtering, obfs4 transport validation, and bridge health checks.
-- **M7 â€” Identity & Footprint**: Identity isolation (personal vs research), metadata inspection, and exposure review.
-- **M8 â€” Honeypot & Deception Lab**: Isolated decoy honeypots (SSH, HTTP, API) with local event recording.
-- **M9 â€” GUI & CLI Integration**: React/TypeScript desktop GUI, authenticated local Go API server, and startup switcher.
-- **M10 â€” Final Security Audit**: Cross-platform testing (Windows, Linux, Kali), failure injection, and release builds.
+M2 supports local endpoint discovery, protocol negotiation, mandatory SAFECOOKIE authentication, Tor version and bootstrap queries, circuit/listener queries, and asynchronous `STATUS_CLIENT`, `CIRC`, and `STREAM` event monitoring. Protocol lines, aggregate responses, event queues, and parser IPC are bounded.
+
+### M2 security boundaries
+
+- SAFECOOKIE is mandatory. The client must not silently downgrade to weaker authentication methods.
+- `SIGNAL NEWNYM` is disabled in M2.
+- M2 does not edit `torrc`, configure bridges, change routes, alter firewall rules, or set system proxy configuration.
+- A successful ControlPort connection does not prove that host traffic is routed through Tor. Applications need a separately configured SOCKS proxy or independently verified routing policy.
+- TCP ControlPort does not provide kernel peer-credential verification. Use a supported local Unix-domain socket when kernel peer identity is a requirement.
+- Configure the Rust inspector using an absolute path when it is not installed beside the gateway executable. Relative executable paths are rejected.
+- Live Tor daemon behavior and native Linux peer-credential behavior must be validated on the target hosts before production use.
+
+## 5. Milestone roadmap
+
+- **M1 — Foundation:** Go module, configuration, status engine, host/network diagnostics, baseline privacy checks, reporting, and CLI foundation.
+- **M2 — Tor Integration (current publishing scope):** read-only Tor Control Protocol monitoring, SAFECOOKIE authentication, bootstrap/circuit observation, and bounded event monitoring.
+- **M3 — Network Privacy:** planned public IP, IPv6, VPN, and WebRTC verification.
+- **M4 — Firewall Protection:** planned firewall adapters and controlled policy enforcement.
+- **M5 — Advanced Routing:** planned routing-chain verification.
+- **M6 — Tracker & Obfuscation:** planned tracker and transport verification.
+- **M7 — Identity & Footprint:** planned isolation and exposure review.
+- **M8 — Honeypot & Deception Lab:** planned isolated decoy research environment.
+- **M9 — GUI & API Integration:** planned desktop GUI and authenticated local API.
+- **M10 — Final Security Audit:** planned cross-platform and failure-injection validation.
+
+Only capabilities implemented and tested in the current source should be described as available. Later roadmap items are not part of the M2 release claim.
