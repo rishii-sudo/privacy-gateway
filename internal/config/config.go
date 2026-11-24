@@ -2,8 +2,11 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -13,6 +16,7 @@ import (
 type Config struct {
 	App       AppConfig       `yaml:"app"`
 	Network   NetworkConfig   `yaml:"network"`
+	Tor       TorConfig       `yaml:"tor"`
 	Logging   LoggingConfig   `yaml:"logging"`
 	Storage   StorageConfig   `yaml:"storage"`
 	Firewall  FirewallConfig  `yaml:"firewall"`
@@ -35,6 +39,24 @@ type NetworkConfig struct {
 	DnsServers               []string      `yaml:"dns_servers"`
 	IgnoreLoopback           bool          `yaml:"ignore_loopback"`
 	VirtualInterfacePrefixes []string      `yaml:"virtual_interface_prefixes"`
+}
+
+// TorConfig defines local Tor daemon connection and Control Protocol parameters.
+type TorConfig struct {
+	Enabled                 bool          `yaml:"enabled"`
+	ControlEndpoint         string        `yaml:"control_endpoint"`
+	NetworkMode             string        `yaml:"network_mode"` // "tcp" or "unix"
+	ConnectionTimeout       time.Duration `yaml:"connection_timeout"`
+	AuthPreference          string        `yaml:"auth_preference"` // "safecookie"
+	CookiePath              string        `yaml:"cookie_path"`
+	EventSubscriptions      []string      `yaml:"event_subscriptions"`
+	ReconnectAttempts       int           `yaml:"reconnect_attempts"`
+	ReconnectBackoff        time.Duration `yaml:"reconnect_backoff"`
+	EventQueueLimit         int           `yaml:"event_queue_limit"`
+	InspectorPath           string        `yaml:"inspector_path"`
+	InspectorTimeout        time.Duration `yaml:"inspector_timeout"`
+	MaxProtocolMsgSize      int           `yaml:"max_protocol_msg_size"`
+	RequirePeerVerification bool          `yaml:"require_peer_verification"`
 }
 
 // LoggingConfig configures structured local logging.
@@ -82,7 +104,7 @@ func DefaultConfig() *Config {
 		App: AppConfig{
 			Name:        "Privacy Gateway",
 			Developer:   "48sh1xbh",
-			Version:     "0.1.0-m1",
+			Version:     "0.2.0-m2",
 			Environment: "production",
 		},
 		Network: NetworkConfig{
@@ -93,6 +115,22 @@ func DefaultConfig() *Config {
 			VirtualInterfacePrefixes: []string{
 				"tun", "tap", "wg", "tailscale", "proton", "openvpn", "ppp",
 			},
+		},
+		Tor: TorConfig{
+			Enabled:                 false, // disabled by default until explicitly enabled
+			ControlEndpoint:         "127.0.0.1:9051",
+			NetworkMode:             "tcp",
+			ConnectionTimeout:       5 * time.Second,
+			AuthPreference:          "safecookie",
+			CookiePath:              "",
+			EventSubscriptions:      []string{"STATUS_CLIENT", "CIRC", "STREAM"},
+			ReconnectAttempts:       3,
+			ReconnectBackoff:        1 * time.Second,
+			EventQueueLimit:         1000,
+			InspectorPath:           "pg-tor-inspector.exe",
+			InspectorTimeout:        2 * time.Second,
+			MaxProtocolMsgSize:      65536,
+			RequirePeerVerification: false,
 		},
 		Logging: LoggingConfig{
 			Level:           "INFO",
@@ -193,6 +231,69 @@ func (c *Config) Validate() error {
 	}
 	if c.Network.ProbeTimeout > 60*time.Second {
 		return fmt.Errorf("network.probe_timeout cannot exceed 60 seconds")
+	}
+
+	// Tor configuration validation
+	if c.Tor.ConnectionTimeout <= 0 {
+		return fmt.Errorf("tor.connection_timeout must be greater than zero")
+	}
+	if c.Tor.ConnectionTimeout > 60*time.Second {
+		return fmt.Errorf("tor.connection_timeout cannot exceed 60 seconds")
+	}
+	if c.Tor.NetworkMode != "" && c.Tor.NetworkMode != "tcp" && c.Tor.NetworkMode != "unix" {
+		return fmt.Errorf("invalid tor.network_mode %q: must be tcp or unix", c.Tor.NetworkMode)
+	}
+	if c.Tor.AuthPreference != "" && !strings.EqualFold(c.Tor.AuthPreference, "safecookie") {
+		return fmt.Errorf("invalid tor.auth_preference %q: only safecookie is supported (silent downgrades prohibited)", c.Tor.AuthPreference)
+	}
+
+	// Validate Tor Control Endpoint
+	if c.Tor.NetworkMode == "unix" {
+		trimmed := strings.TrimSpace(c.Tor.ControlEndpoint)
+		if trimmed == "" {
+			return fmt.Errorf("tor.control_endpoint must not be empty for unix mode")
+		}
+		if strings.Contains(trimmed, "\x00") {
+			return fmt.Errorf("invalid tor.control_endpoint: unix socket path contains null byte")
+		}
+		clean := filepath.Clean(trimmed)
+		if !filepath.IsAbs(clean) && !strings.HasPrefix(clean, "/") && !strings.HasPrefix(clean, "\\") {
+			return fmt.Errorf("invalid tor.control_endpoint: unix socket path must be absolute, got %q", c.Tor.ControlEndpoint)
+		}
+	} else {
+		// Default is TCP mode
+		if strings.TrimSpace(c.Tor.ControlEndpoint) == "" {
+			return fmt.Errorf("tor.control_endpoint must not be empty for tcp mode")
+		}
+		host, port, err := net.SplitHostPort(c.Tor.ControlEndpoint)
+		if err != nil {
+			return fmt.Errorf("invalid tor.control_endpoint %q: must be valid host:port format: %w", c.Tor.ControlEndpoint, err)
+		}
+		if strings.TrimSpace(port) == "" {
+			return fmt.Errorf("invalid tor.control_endpoint %q: missing port", c.Tor.ControlEndpoint)
+		}
+		portNum, err := strconv.Atoi(port)
+		if err != nil || portNum < 1 || portNum > 65535 {
+			return fmt.Errorf("invalid tor.control_endpoint %q: port must be a number between 1 and 65535", c.Tor.ControlEndpoint)
+		}
+		ip := net.ParseIP(host)
+		isLoopback := (ip != nil && ip.IsLoopback()) || strings.EqualFold(host, "localhost")
+		if !isLoopback {
+			return fmt.Errorf("tor.control_endpoint must be a local loopback address: got %q", c.Tor.ControlEndpoint)
+		}
+	}
+
+	if c.Tor.EventQueueLimit <= 0 {
+		return fmt.Errorf("tor.event_queue_limit must be greater than zero")
+	}
+	if c.Tor.EventQueueLimit > 10000 {
+		return fmt.Errorf("tor.event_queue_limit cannot exceed safe maximum of 10000: got %d", c.Tor.EventQueueLimit)
+	}
+	if c.Tor.MaxProtocolMsgSize <= 0 {
+		return fmt.Errorf("tor.max_protocol_msg_size must be greater than zero")
+	}
+	if c.Tor.MaxProtocolMsgSize > 65536 {
+		return fmt.Errorf("tor.max_protocol_msg_size cannot exceed 65536 bytes: got %d", c.Tor.MaxProtocolMsgSize)
 	}
 
 	validLevels := map[string]bool{

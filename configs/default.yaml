@@ -3,7 +3,7 @@
 app:
   name: "Privacy Gateway"
   developer: "48sh1xbh"
-  version: "0.1.0-m1"
+  version: "0.2.0-m2"
   environment: "production"
 
 network:
@@ -21,6 +21,24 @@ network:
     - "proton"
     - "openvpn"
     - "ppp"
+
+tor:
+  enabled: false
+  control_endpoint: "127.0.0.1:9051"
+  network_mode: "tcp"
+  connection_timeout: 5s
+  auth_preference: "safecookie"
+  cookie_path: ""
+  event_subscriptions:
+    - "STATUS_CLIENT"
+    - "CIRC"
+    - "STREAM"
+  reconnect_attempts: 3
+  reconnect_backoff: 1s
+  event_queue_limit: 1000
+  inspector_path: "pg-tor-inspector"
+  inspector_timeout: 2s
+  max_protocol_msg_size: 65536
 
 logging:
   level: "INFO"

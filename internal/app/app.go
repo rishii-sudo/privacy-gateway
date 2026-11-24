@@ -2,10 +2,12 @@ package app
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rishii-sudo/privacy-gateway/internal/config"
@@ -14,10 +16,11 @@ import (
 	"github.com/rishii-sudo/privacy-gateway/internal/network"
 	"github.com/rishii-sudo/privacy-gateway/internal/privacy"
 	"github.com/rishii-sudo/privacy-gateway/internal/report"
+	"github.com/rishii-sudo/privacy-gateway/internal/tor"
 )
 
 const (
-	Version   = "0.1.0-m1"
+	Version   = "0.2.0-m2"
 	Developer = "48sh1xbh"
 )
 
@@ -28,7 +31,10 @@ type Application struct {
 	Monitor    *monitor.SystemMonitor
 	Enumerator *network.NetworkEnumerator
 	Checker    *privacy.Checker
+	torClient  *tor.Client
 	startTime  time.Time
+	closeOnce  sync.Once
+	closeErr   error
 }
 
 // NewApplication constructs and initializes core application subsystems from a config path.
@@ -76,12 +82,31 @@ func NewApplicationWithConfig(cfg *config.Config) (*Application, error) {
 	}, nil
 }
 
-// Close gracefully flushes and releases application resources.
+// Close gracefully flushes and releases application resources in safe shutdown order.
+// The Tor client is closed first while the logger is still available; then the logger is closed.
+// All shutdown errors are combined and returned, and shutdown behavior is idempotent.
 func (a *Application) Close() error {
-	if a.Logger != nil {
-		return a.Logger.Close()
-	}
-	return nil
+	a.closeOnce.Do(func() {
+		var errs []error
+
+		// 1. Close Tor controller first while logger is still alive
+		if a.torClient != nil {
+			if err := a.torClient.Close(); err != nil && !errors.Is(err, tor.ErrClosed) {
+				errs = append(errs, fmt.Errorf("tor client shutdown error: %w", err))
+			}
+		}
+
+		// 2. Flush and close the logger last
+		if a.Logger != nil {
+			if err := a.Logger.Close(); err != nil {
+				errs = append(errs, fmt.Errorf("logger shutdown error: %w", err))
+			}
+		}
+
+		a.closeErr = errors.Join(errs...)
+	})
+
+	return a.closeErr
 }
 
 // RunInteractiveStartup presents the master interactive startup menu.
@@ -177,6 +202,8 @@ func (a *Application) RunInteractiveCLI(scanner *bufio.Scanner, out io.Writer) e
 			_ = a.RunReport(out, jsonOut)
 		case "diagnostics":
 			_ = a.RunDiagnostics(out)
+		case "tor":
+			_ = a.RunTorCommand(out, parts[1:])
 		case "logs":
 			a.showRecentLogs(out)
 		case "recycle":
@@ -381,6 +408,7 @@ func (a *Application) ShowCLIHelp(out io.Writer) {
 	fmt.Fprintln(out, "  check         Run all baseline privacy and security verification checks")
 	fmt.Fprintln(out, "  report        Generate detailed audit report (add --json for JSON format)")
 	fmt.Fprintln(out, "  diagnostics   Perform read-only system and network diagnostics")
+	fmt.Fprintln(out, "  tor           Tor daemon operations [status|bootstrap|circuits|events|diagnostics]")
 	fmt.Fprintln(out, "  logs          View recent structured logs")
 	fmt.Fprintln(out, "  recycle       List archived log files in Recycle Bin")
 	fmt.Fprintln(out, "  help          Show this command reference")
@@ -404,5 +432,6 @@ func ShowUsage(out io.Writer) {
 	fmt.Fprintln(out, "  privacy-gateway status       Display system status")
 	fmt.Fprintln(out, "  privacy-gateway check        Execute all privacy verification checks")
 	fmt.Fprintln(out, "  privacy-gateway report       Generate security audit report (--json for JSON)")
+	fmt.Fprintln(out, "  privacy-gateway tor [subcmd] Monitor Tor daemon (status, bootstrap, circuits, events, diagnostics)")
 	fmt.Fprintln(out, "  privacy-gateway diagnostics  Run system diagnostics")
 }

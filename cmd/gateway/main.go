@@ -64,6 +64,9 @@ func runWithApp(args []string, application *app.Application) error {
 		jsonOut := containsFlag(args[1:], "--json")
 		return application.RunReport(os.Stdout, jsonOut)
 
+	case "tor":
+		return application.RunTorCommand(os.Stdout, args[1:])
+
 	default:
 		fmt.Fprintf(os.Stdout, "Unknown command or flag: %s\n\n", firstArg)
 		app.ShowUsage(os.Stdout)

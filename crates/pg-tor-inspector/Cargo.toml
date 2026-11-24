@@ -1,0 +1,17 @@
+[package]
+name = "pg-tor-inspector"
+version = "0.1.0"
+edition = "2021"
+authors = ["48sh1xbh"]
+description = "Secure, isolated, bounded Tor Control Protocol response parser for Privacy Gateway"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
